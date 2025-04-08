@@ -26,48 +26,73 @@ const openai = new OpenAI({
 
 // Routes
 app.get('/api/conversations', async (req, res) => {
-    console.log('Fetching conversations...');
+    console.log('Fetching conversations (using mock data)...');
+    // UWAGA: API OpenAI Threads nie pozwala na globalne listowanie wątków.
+    // Aplikacja musiałaby przechowywać listę ID wątków.
+    // Na potrzeby MVP zwracamy statyczną listę.
+    // W przyszłości należy zaimplementować mechanizm tworzenia/przechowywania wątków.
     try {
-        const response = await openai.models.list();
-        console.log('Models response:', response);
-        const conversations = response.data.map(model => ({
-            id: model.id,
-            created_at: Math.floor(Date.now() / 1000),
-            title: model.id
-        }));
-        res.json({ data: conversations });
+        // Przykładowe dane wątków
+        const mockThreads = [
+            { id: "thread_abc123", created_at: Math.floor(Date.now() / 1000) - 3600, title: "Example Thread 1" },
+            { id: "thread_def456", created_at: Math.floor(Date.now() / 1000) - 7200, title: "Example Thread 2" }
+        ];
+        // Można by spróbować pobrać listę asystentów i ich wątków, jeśli taka logika istnieje
+        // const threads = await openai.beta.threads.list(); // Ta metoda nie istnieje
+        // console.log('Threads response:', threads);
+        res.json({ data: mockThreads });
     } catch (error) {
         console.error('Error fetching conversations:', error);
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Failed to fetch conversations',
-            details: error.message 
+            details: error.message
         });
     }
 });
 
 app.get('/api/conversations/:id', async (req, res) => {
-    console.log('Fetching conversation:', req.params.id);
+    const threadId = req.params.id;
+    console.log('Fetching messages for thread:', threadId);
     try {
-        const conversationId = req.params.id;
-        const messages = {
-            data: [
-                {
-                    role: 'user',
-                    content: [{ text: { value: 'Hello, how are you?' } }]
-                },
-                {
-                    role: 'assistant',
-                    content: [{ text: { value: 'I am doing well, thank you!' } }]
-                }
-            ]
-        };
-        res.json(messages);
-    } catch (error) {
-        console.error('Error fetching conversation:', error);
-        res.status(500).json({ 
-            error: 'Failed to fetch conversation',
-            details: error.message 
+        // Pobieranie wiadomości dla danego wątku (thread)
+        const messages = await openai.beta.threads.messages.list(threadId, {
+            order: 'asc' // Sortuj od najstarszej do najnowszej
         });
+        console.log('Messages response:', messages);
+
+        // Mapowanie danych do formatu oczekiwanego przez frontend
+        // Zakładamy, że content jest typu 'text'
+        const formattedMessages = messages.data.map(msg => {
+            // Sprawdzamy, czy content istnieje i ma oczekiwaną strukturę
+            let contentValue = 'No content found'; // Domyślna wartość
+            if (msg.content && msg.content.length > 0 && msg.content[0].type === 'text' && msg.content[0].text) {
+                contentValue = msg.content[0].text.value;
+            } else {
+                 console.warn(`Message ${msg.id} has unexpected content structure:`, msg.content);
+            }
+            return {
+                id: msg.id,
+                role: msg.role,
+                // Frontend oczekuje content jako tablicy obiektów z polem text.value
+                content: [{ text: { value: contentValue } }]
+            };
+        });
+
+        res.json({ data: formattedMessages });
+    } catch (error) {
+        console.error('Error fetching conversation details:', error);
+        // Lepsza obsługa błędów specyficznych dla API (np. 404 Not Found dla wątku)
+        if (error.status === 404) {
+             res.status(404).json({
+                error: 'Conversation (thread) not found',
+                details: `Thread with ID ${threadId} not found.`
+            });
+        } else {
+            res.status(500).json({
+                error: 'Failed to fetch conversation details',
+                details: error.message
+            });
+        }
     }
 });
 
